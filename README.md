@@ -1,5 +1,7 @@
 # pdf-ollama-cli
 
+![banner](banner.png)
+
 `pdf-ollama-cli` is a Go command-line application that extracts text from a PDF, summarizes the content in parallel with Ollama, and produces a final consolidated summary.
 
 The project is intentionally structured with clear separation between application logic, infrastructure adapters, and runtime configuration so it can evolve beyond a simple script.
