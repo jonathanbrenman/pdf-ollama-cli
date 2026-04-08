@@ -1,96 +1,328 @@
 # pdf-ollama-cli
 
-A Go CLI that extracts text from a PDF, summarizes it in parallel chunks with Ollama, and then builds a consolidated final summary.
+`pdf-ollama-cli` is a Go command-line application that extracts text from a PDF, summarizes the content in parallel with Ollama, and produces a final consolidated summary.
 
-## Overview
+The project is intentionally structured with clear separation between application logic, infrastructure adapters, and runtime configuration so it can evolve beyond a simple script.
 
-The tool runs a two-stage summarization pipeline:
+## Table of Contents
 
-1. Extract raw text from a PDF using `pdftotext`.
-2. Split text into chunks and summarize each chunk concurrently.
-3. Merge partial summaries and request a final executive summary.
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Project structure](#project-structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Running the program](#running-the-program)
+- [Build](#build)
+- [Testing](#testing)
+- [Operational notes](#operational-notes)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
 
-This design improves throughput for large documents while keeping the summarization logic isolated from infrastructure concerns.
+## What it does
+
+The application executes a two-pass summarization workflow:
+
+1. Extract text from a PDF using `pdftotext`.
+2. Split the text into chunks.
+3. Process those chunks concurrently against Ollama.
+4. Merge the intermediate summaries.
+5. Generate a final summary with an executive structure.
+
+This approach makes large documents more manageable and improves total processing time compared to a fully sequential summarization flow.
 
 ## Architecture
 
-The project follows a layered architecture:
+The codebase follows a layered architecture.
 
-- `main.go`: composition root and CLI entrypoint.
-- `config/`: configuration loading from environment variables with defaults.
-- `internal/app/summarizer/`: application service and business flow orchestration.
-- `internal/infra/pdf/`: PDF extraction adapter (`pdftotext`).
-- `internal/infra/ollama/`: HTTP adapter for Ollama API.
+- `main.go`
+	Application entrypoint and dependency composition root.
+- `config/`
+	Runtime configuration loading from environment variables.
+- `internal/app/summarizer/`
+	Core use case and orchestration of the summarization pipeline.
+- `internal/infra/pdf/`
+	Adapter for PDF text extraction via `pdftotext`.
+- `internal/infra/ollama/`
+	Adapter for Ollama HTTP API communication.
+
+### Design goals
+
+- Keep business flow isolated from infrastructure details.
+- Allow adapters to be replaced independently.
+- Support unit testing of the application service through interfaces.
+- Keep `main` small and focused on wiring only.
 
 ### Dependency direction
 
 - `main` depends on `config`, `internal/app`, and `internal/infra`.
-- `internal/app` depends only on interfaces (ports), not concrete infrastructure.
-- `internal/infra` implements those interfaces.
+- `internal/app` depends on ports/interfaces, not concrete adapters.
+- `internal/infra` provides concrete implementations for those ports.
+
+## Project structure
+
+```text
+.
+├── config/
+│   ├── config.go
+│   └── config_test.go
+├── internal/
+│   ├── app/
+│   │   └── summarizer/
+│   │       ├── service.go
+│   │       └── service_test.go
+│   └── infra/
+│       ├── ollama/
+│       │   ├── client.go
+│       │   └── client_test.go
+│       └── pdf/
+│           ├── extractor.go
+│           └── extractor_test.go
+│       └── terminal/
+│           ├── renderer.go
+│           └── renderer_test.go
+├── main.go
+├── main_test.go
+├── go.mod
+└── README.md
+```
 
 ## Requirements
 
-- Go `1.23+`
-- Ollama running locally or remotely with an available model
-- `pdftotext` installed and available in PATH
+To run the project locally you need:
 
-### Install pdftotext (Linux)
+- Go `1.24` or newer.
+- Ollama installed and reachable from the configured URL.
+- A model available in Ollama.
+- `pdftotext` installed and available in `PATH`, unless overridden with `PDFTOTEXT_BIN`.
+
+### Runtime dependencies
+
+- Ollama API compatible with `POST /api/generate`.
+- A supported PDF file that can be processed by `pdftotext`.
+
+### Install `pdftotext` on Linux
 
 ```bash
-sudo apt-get update && sudo apt-get install -y poppler-utils
+sudo apt-get update
+sudo apt-get install -y poppler-utils
 ```
+
+### Check local tooling
+
+```bash
+go version
+ollama --version
+pdftotext -v
+```
+
+## Installation
+
+Clone the repository and download dependencies:
+
+```bash
+git clone https://github.com/jonathanbrenman/pdf-ollama-cli
+cd pdf-ollama-cli
+go mod download
+```
+
+Pull or verify the Ollama model you want to use:
+
+```bash
+ollama pull gemma4:e4b
+```
+
+If Ollama is local, start the service before running the CLI.
 
 ## Configuration
 
-The application uses environment variables with safe defaults:
+Configuration is read from environment variables and uses defaults when no explicit value is provided.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `CHUNK_SIZE` | `2000` | Approximate number of characters per chunk |
-| `NUM_WORKERS` | `4` | Number of concurrent chunk workers |
-| `OLLAMA_MODEL` | `gemma4:e4b` | Ollama model used for generation |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL |
-| `PDFTOTEXT_BIN` | `pdftotext` | Path or command name for the PDF extractor binary |
-| `HTTP_TIMEOUT_SECONDS` | `120` | HTTP timeout used by the Ollama client |
+| `CHUNK_SIZE` | `2000` | Approximate number of characters processed per chunk |
+| `NUM_WORKERS` | `4` | Number of concurrent workers used for chunk summarization |
+| `OLLAMA_MODEL` | `gemma4:e4b` | Model name sent to Ollama |
+| `OLLAMA_URL` | `http://localhost:11434` | Base URL for the Ollama server |
+| `PDFTOTEXT_BIN` | `pdftotext` | Binary name or absolute path for PDF extraction |
+| `HTTP_TIMEOUT_SECONDS` | `120` | Timeout used by the HTTP client when calling Ollama |
 
-## Quick Start
+### CLI flags
 
-1. Ensure Ollama is running and the model is available.
-2. Export custom environment variables only if needed.
-3. Run the CLI with a PDF path.
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--language` | `Spanish` | Language requested for the generated final summary |
+| `--lang` | `Spanish` | Alias for `--language` |
+
+### Example configuration
 
 ```bash
-go run . /path/to/file.pdf
+export OLLAMA_URL="http://localhost:11434"
+export OLLAMA_MODEL="gemma4:e4b"
+export NUM_WORKERS=6
+export CHUNK_SIZE=3000
+export HTTP_TIMEOUT_SECONDS=180
 ```
 
-Expected output:
+## Running the program
 
-- A final summary printed to stdout.
-- Any execution errors printed to stderr with a non-zero exit code.
+The CLI expects exactly one positional argument: the path to a PDF file.
+
+The output language can be controlled with a CLI flag.
+
+### Run directly with Go
+
+```bash
+go run . /path/to/document.pdf
+```
+
+### Run with an explicit output language
+
+```bash
+go run . --language English /path/to/document.pdf
+```
+
+```bash
+go run . --lang Portuguese /path/to/document.pdf
+```
+
+### Build first, then run the binary
+
+```bash
+go build -o bin/pdf-ollama-cli .
+./bin/pdf-ollama-cli --language English /path/to/document.pdf
+```
+
+### CLI usage
+
+```bash
+pdf-ollama-cli [--language <language>] <file.pdf>
+```
+
+### Example
+
+```bash
+export OLLAMA_MODEL="gemma4:e4b"
+go run . --language English ./sample.pdf
+```
+
+### Expected behavior
+
+- The final summary is printed to standard output.
+- When terminal rendering is available, the Markdown response is rendered with terminal styling.
+- Errors are printed to standard error.
+- On failure, the process exits with a non-zero status code.
 
 ## Build
+
+Build all packages:
 
 ```bash
 go build ./...
 ```
 
-## Example with custom settings
+Build a distributable binary:
 
 ```bash
-export OLLAMA_MODEL="gemma4:e4b"
-export NUM_WORKERS=6
-export CHUNK_SIZE=3000
-go run . ./sample.pdf
+mkdir -p bin
+go build -o bin/pdf-ollama-cli .
 ```
+
+Useful verification commands:
+
+```bash
+go fmt ./...
+go vet ./...
+go build ./...
+```
+
+## Testing
+
+Run the full test suite:
+
+```bash
+go test ./...
+```
+
+Current test coverage is organized by package:
+
+- `config`: configuration loading behavior.
+- `internal/app/summarizer`: summarization service behavior.
+- `internal/infra/ollama`: Ollama client behavior.
+- `internal/infra/pdf`: PDF extractor behavior.
+- `internal/infra/terminal`: Markdown rendering and sanitization behavior.
+- `main`: CLI argument parsing behavior.
+
+Run tests with verbose output:
+
+```bash
+go test -v ./...
+```
+
+Run tests with coverage:
+
+```bash
+go test -cover ./...
+```
+
+Run tests for a single package:
+
+```bash
+go test ./internal/app/summarizer
+```
+
+## Operational notes
+
+- Large PDFs may require tuning `CHUNK_SIZE` and `NUM_WORKERS` to balance latency, memory usage, and model response quality.
+- Increasing workers can improve throughput, but it also increases pressure on the Ollama instance.
+- Very small chunk sizes can degrade summary coherence.
+- Very large chunk sizes can exceed model comfort limits or increase latency significantly.
+- The final output is emitted as Markdown and rendered for terminal display when the renderer is available.
 
 ## Troubleshooting
 
-- `run pdftotext: ...`: install `poppler-utils` or set `PDFTOTEXT_BIN` to the correct binary.
-- `send request: ...`: verify Ollama is running and reachable from `OLLAMA_URL`.
-- `ollama returned status ...`: check model availability and request limits in Ollama.
-- Empty or weak summaries: tune `CHUNK_SIZE`, `NUM_WORKERS`, and the selected model.
+### `run pdftotext: ...`
 
-## Notes
+Cause:
+The extractor binary is missing or not reachable.
 
-- The current CLI accepts exactly one positional argument: the PDF path.
-- Prompts are defined in the summarizer service and can be evolved without changing infrastructure adapters.
+Action:
+
+```bash
+sudo apt-get install -y poppler-utils
+```
+
+Or point `PDFTOTEXT_BIN` to the correct binary path.
+
+### `send request: ...`
+
+Cause:
+The CLI cannot reach Ollama.
+
+Action:
+
+- Verify that Ollama is running.
+- Verify `OLLAMA_URL`.
+- Check firewall, container, or host-network restrictions if Ollama is remote.
+
+### `ollama returned status ...`
+
+Cause:
+Ollama rejected the request.
+
+Action:
+
+- Confirm the configured model exists.
+- Confirm the server supports the requested endpoint.
+- Review Ollama logs for resource or model errors.
+
+### Empty or poor summaries
+
+Cause:
+Input chunking and model selection are not aligned with the document.
+
+Action:
+
+- Increase `CHUNK_SIZE` for more context per request.
+- Reduce `NUM_WORKERS` if the Ollama instance is saturated.
+- Try a stronger or better-suited model.
