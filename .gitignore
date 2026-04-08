@@ -2,3 +2,4 @@ pdfcli
 .vscode
 .idea
 .env
+coverage.out
