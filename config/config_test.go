@@ -1,18 +1,16 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
 func TestLoad(t *testing.T) {
 	t.Run("default values", func(t *testing.T) {
-		// Clear env vars to ensure we use fallbacks
-		os.Unsetenv("CHUNK_SIZE")
-		os.Unsetenv("NUM_WORKERS")
-		os.Unsetenv("OLLAMA_MODEL")
-		os.Unsetenv("OLLAMA_URL")
-		os.Unsetenv("PDFTOTEXT_BIN")
+		t.Setenv("CHUNK_SIZE", "")
+		t.Setenv("NUM_WORKERS", "")
+		t.Setenv("OLLAMA_MODEL", "")
+		t.Setenv("OLLAMA_URL", "")
+		t.Setenv("PDFTOTEXT_BIN", "")
 
 		cfg := Load()
 
@@ -25,10 +23,8 @@ func TestLoad(t *testing.T) {
 	})
 
 	t.Run("environment overrides", func(t *testing.T) {
-		os.Setenv("CHUNK_SIZE", "5000")
-		os.Setenv("OLLAMA_MODEL", "llama2")
-		defer os.Unsetenv("CHUNK_SIZE")
-		defer os.Unsetenv("OLLAMA_MODEL")
+		t.Setenv("CHUNK_SIZE", "5000")
+		t.Setenv("OLLAMA_MODEL", "llama2")
 
 		cfg := Load()
 
@@ -41,8 +37,7 @@ func TestLoad(t *testing.T) {
 	})
 
 	t.Run("invalid int value", func(t *testing.T) {
-		os.Setenv("CHUNK_SIZE", "not-a-number")
-		defer os.Unsetenv("CHUNK_SIZE")
+		t.Setenv("CHUNK_SIZE", "not-a-number")
 
 		cfg := Load()
 
