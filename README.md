@@ -91,7 +91,7 @@ The codebase follows a layered architecture.
 
 To run the project locally you need:
 
-- Go `1.24` or newer.
+- Go `1.25` or newer (Go `1.26` recommended for security).
 - Ollama installed and reachable from the configured URL.
 - A model available in Ollama.
 - `pdftotext` installed and available in `PATH`, unless overridden with `PDFTOTEXT_BIN`.
@@ -236,12 +236,41 @@ go vet ./...
 go build ./...
 ```
 
-## Testing
+## CI/CD Pipeline
+
+The project includes a GitHub Actions pipeline (`.github/workflows/ci.yml`) that automatically runs on every push and pull request to `main` or `master`. It performs the following checks:
+
+- **Linter**: Uses `golangci-lint` to ensure code quality.
+- **Security Scan**: Uses `govulncheck` to identify vulnerabilities in the standard library and dependencies.
+- **Tests & Coverage**: Executes the full test suite and enforces a minimum **80% code coverage** threshold.
+
+## Testing & Quality Control
 
 Run the full test suite:
 
 ```bash
 go test ./...
+```
+
+Run tests with coverage:
+
+```bash
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+### Run security scan locally
+
+```bash
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...
+```
+
+### Run linter locally
+
+```bash
+# Requires golangci-lint installed
+golangci-lint run ./...
 ```
 
 Current test coverage is organized by package:
