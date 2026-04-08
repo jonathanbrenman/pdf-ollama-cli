@@ -57,18 +57,20 @@ func NewService(extractor TextExtractor, llm LLMClient, opts Options) *Service {
 	}
 }
 
-func (s *Service) SummarizePDF(ctx context.Context, pdfPath string) (string, error) {
+func (s *Service) SummarizePDF(ctx context.Context, pdfPath, language string) (string, error) {
+	language = normalizeLanguage(language)
+
 	text, err := s.extractor.ExtractText(ctx, pdfPath)
 	if err != nil {
 		return "", fmt.Errorf("extract text: %w", err)
 	}
 
-	partial, err := s.processText(ctx, text)
+	partial, err := s.processText(ctx, text, language)
 	if err != nil {
 		return "", fmt.Errorf("process text: %w", err)
 	}
 
-	final, err := s.finalSummary(ctx, partial)
+	final, err := s.finalSummary(ctx, partial, language)
 	if err != nil {
 		return "", fmt.Errorf("final summary: %w", err)
 	}
@@ -76,7 +78,7 @@ func (s *Service) SummarizePDF(ctx context.Context, pdfPath string) (string, err
 	return final, nil
 }
 
-func (s *Service) processText(ctx context.Context, text string) (string, error) {
+func (s *Service) processText(ctx context.Context, text, language string) (string, error) {
 	chunks := splitText(text, s.chunkSize)
 	if len(chunks) == 0 {
 		return "", fmt.Errorf("no text extracted from pdf")
@@ -93,7 +95,7 @@ func (s *Service) processText(ctx context.Context, text string) (string, error) 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.worker(workerCtx, jobs, results)
+			s.worker(workerCtx, jobs, results, language)
 		}()
 	}
 
@@ -128,7 +130,7 @@ func (s *Service) processText(ctx context.Context, text string) (string, error) 
 	return strings.Join(outputs, "\n\n"), nil
 }
 
-func (s *Service) worker(ctx context.Context, jobs <-chan job, results chan<- result) {
+func (s *Service) worker(ctx context.Context, jobs <-chan job, results chan<- result, language string) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -139,9 +141,10 @@ func (s *Service) worker(ctx context.Context, jobs <-chan job, results chan<- re
 			}
 
 			prompt := fmt.Sprintf(`Act as a technical analyst.
-Summarize this fragment with concise bullet points:
+			Summarize this fragment in %s.
+Return the response as Markdown using concise bullet points only.
 
-%s`, currentJob.chunk)
+			%s`, language, currentJob.chunk)
 
 			resp, err := s.llm.Generate(ctx, prompt)
 
@@ -176,14 +179,30 @@ func splitText(text string, size int) []string {
 	return chunks
 }
 
-func (s *Service) finalSummary(ctx context.Context, intermediate string) (string, error) {
+func (s *Service) finalSummary(ctx context.Context, intermediate, language string) (string, error) {
 	prompt := fmt.Sprintf(`You have partial summaries for a document.
-Unify everything into:
-- executive summary
-- key points
-- conclusions
+	The output must be in %s.
+	Return the final response as valid Markdown.
 
-%s`, intermediate)
+	Use this structure in the language specified:
+
+		# Executive Summary
+
+		## Key Points
+
+		## Conclusions
+
+		Content:
+	%s`, language, intermediate)
 
 	return s.llm.Generate(ctx, prompt)
+}
+
+func normalizeLanguage(language string) string {
+	trimmed := strings.TrimSpace(language)
+	if trimmed == "" {
+		return "Spanish"
+	}
+
+	return trimmed
 }
